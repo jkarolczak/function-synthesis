@@ -26,16 +26,19 @@ class AbstractBlock(nn.Module):
 class AbstractWeightedBlock(AbstractBlock):
     def __init__(self, in_features: int, out_features: int) -> None:
         super().__init__()
-        self.weight = nn.Parameter(torch.rand(in_features, out_features))
-        self.sigmoid = nn.Sigmoid()
+        self._weight = nn.Parameter(torch.rand(in_features, out_features))
 
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         pass
 
     @property
+    def weight(self) -> torch.Tensor:
+        return self._weight.data
+
+    @property
     def scalar_weight(self) -> torch.Tensor:
-        return torch.mean(self.weight)
+        return torch.mean(self._weight).detach().cpu()
 
 
 class LinearBlock(AbstractWeightedBlock):
@@ -43,7 +46,7 @@ class LinearBlock(AbstractWeightedBlock):
         super().__init__(in_features=in_features, out_features=out_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.weight * x
+        return self._weight * x.clone()
 
 
 class InverseBlock(AbstractWeightedBlock):
@@ -57,7 +60,7 @@ class InverseBlock(AbstractWeightedBlock):
                 x[x == 0] = ZERO_CORRECTION
             else:
                 raise OutOfDomain(x)
-        return self.weight * (1 / x)
+        return self._weight * (1 / x)
 
 
 class BiasBlock(AbstractBlock):
@@ -70,7 +73,7 @@ class BiasBlock(AbstractBlock):
 
     @property
     def scalar_weight(self) -> torch.Tensor:
-        return torch.mean(self.bias)
+        return torch.mean(self.bias).detach().cpu()
 
 
 class SinBlock(AbstractWeightedBlock):
@@ -78,7 +81,7 @@ class SinBlock(AbstractWeightedBlock):
         super().__init__(in_features=in_features, out_features=out_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.weight * torch.sin(x)
+        return self._weight * torch.sin(x)
 
 
 class CosBlock(AbstractWeightedBlock):
@@ -86,7 +89,7 @@ class CosBlock(AbstractWeightedBlock):
         super().__init__(in_features=in_features, out_features=out_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.weight * torch.cos(x)
+        return self._weight * torch.cos(x)
 
 
 class AbsBlock(AbstractWeightedBlock):
@@ -94,7 +97,7 @@ class AbsBlock(AbstractWeightedBlock):
         super().__init__(in_features=in_features, out_features=out_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.weight * torch.abs(x)
+        return self._weight * torch.abs(x)
 
 
 class SigmoidBlock(AbstractWeightedBlock):
@@ -102,7 +105,7 @@ class SigmoidBlock(AbstractWeightedBlock):
         super().__init__(in_features=in_features, out_features=out_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.weight * nn.functional.sigmoid(x)
+        return self._weight * nn.functional.sigmoid(x)
 
 
 class AbstractLogBlock(AbstractWeightedBlock):
@@ -119,7 +122,7 @@ class AbstractLogBlock(AbstractWeightedBlock):
         x += self.domain_minimum
         if torch.sum(x <= 0):
             raise OutOfDomain(x)
-        return self.weight * self.log(x)
+        return self._weight * self.log(x)
 
 
 class LnBlock(AbstractLogBlock):
@@ -147,3 +150,7 @@ class Log10Block(AbstractLogBlock):
     @property
     def log(self) -> Callable[[torch.Tensor], torch.Tensor]:
         return torch.log10
+
+
+ALL_BLOCKS = [AbsBlock, BiasBlock, CosBlock, InverseBlock, LnBlock, Log2Block, Log10Block, LinearBlock, SigmoidBlock,
+              SinBlock]
