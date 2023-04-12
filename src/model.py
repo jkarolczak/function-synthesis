@@ -90,8 +90,7 @@ class ModelFactory:
         model = self.fit_prune(model)
         return model
 
-    def from_occurrence_dict(self, blocks_classes: Dict[Type[AbstractBlock], int], x: torch.Tensor,
-                             y: torch.Tensor) -> Model:
+    def from_occurrence_dict(self, blocks_classes: Dict[Type[AbstractBlock], int]) -> Model:
         blocks = []
         for (cls, occurrence) in blocks_classes.items():
             blocks.extend(cls(self.in_features, self.out_features) for _ in range(occurrence))
