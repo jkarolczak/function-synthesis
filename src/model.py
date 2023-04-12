@@ -55,6 +55,7 @@ class ModelFactory:
         while len(model.blocks) > self.max_size:
             model = self.fit(model)
             model = self.prune(model)
+        model = self.fit(model)
         return model
 
     def check_early_stopping(self, loss: float, loss_hist: List[float]) -> Tuple[bool, List[float]]:
