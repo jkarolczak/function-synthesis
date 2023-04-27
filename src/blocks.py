@@ -62,7 +62,6 @@ class InverseBlock(AbstractWeightedBlock):
                 raise OutOfDomain(x)
         return self._weight * (1 / x)
 
-
 class BiasBlock(AbstractBlock):
     def __init__(self, in_features: int, out_features: int) -> None:
         super().__init__()
