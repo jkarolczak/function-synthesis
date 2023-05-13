@@ -40,6 +40,16 @@ class AbstractWeightedBlock(AbstractBlock):
     def scalar_weight(self) -> torch.Tensor:
         return torch.mean(self._weight).detach().cpu()
 
+    @property
+    def weight_str(self) -> str:
+        return "[" + ", ".join(["[" + ", ".join([eval("f'{wi:2.4f}'") for wi in w]) + "]" for w in self.weight]) + "]"
+
+    def str(self, inner: str = "x") -> str:
+        return f"{self.weight_str} * {type(self).__name__[:-5].lower()}({inner})"
+
+    def __str__(self) -> str:
+        return self.str("x")
+
 
 class LinearBlock(AbstractWeightedBlock):
     def __init__(self, in_features: int, out_features: int) -> None:
@@ -47,6 +57,9 @@ class LinearBlock(AbstractWeightedBlock):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._weight * x.clone()
+
+    def str(self, inner: str = "x") -> str:
+        return f"{self.weight_str} * {inner}"
 
 
 class InverseBlock(AbstractWeightedBlock):
@@ -62,6 +75,10 @@ class InverseBlock(AbstractWeightedBlock):
                 raise OutOfDomain(x)
         return self._weight * (1 / x)
 
+    def str(self, inner: str = "x") -> str:
+        return f"{self.weight_str} * (1 / {inner})"
+
+
 class BiasBlock(AbstractBlock):
     def __init__(self, in_features: int, out_features: int) -> None:
         super().__init__()
@@ -69,6 +86,12 @@ class BiasBlock(AbstractBlock):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.bias
+
+    def str(self, *args, **kwargs) -> str:
+        return "[" + ", ".join([eval("f'{b:2.4f}'") for b in self.bias]) + "]"
+
+    def __str__(self) -> str:
+        return self.str()
 
     @property
     def scalar_weight(self) -> torch.Tensor:
