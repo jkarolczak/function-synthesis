@@ -11,3 +11,4 @@ if __name__ == "__main__":
         [CosBlock, SinBlock, LinearBlock])
     print(torch.hstack([model.forward(x), y]))
     print(model)
+    print(len(model))

@@ -42,6 +42,9 @@ class Model(nn.Module):
     def __str__(self) -> str:
         return "y = " + self.str("x")
 
+    def __len__(self) -> int:
+        return len(self.blocks)
+
 
 class MultiLayerModel(Model):
     def __init__(self, block: AbstractWeightedBlock, blocks: Union[List[AbstractWeightedBlock], List[Model]]) -> None:
@@ -63,6 +66,15 @@ class MultiLayerModel(Model):
 
     def __str__(self) -> str:
         return "y = " + self.str()
+
+    def __len__(self) -> int:
+        length = 0
+        for b in self.blocks:
+            try:
+                length += len(b)
+            except:
+                length += 1
+        return length + 1
 
 
 class ModelFactoryInterface(ABC):
@@ -141,23 +153,14 @@ class MultiLayerModelFactory(ModelFactoryInterface):
         super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls)
         self.layers = layers
 
-    def fit_prune(self, model: Model, full_model: Model = None) -> Model:
+    def fit_prune(self, model: Model) -> Model:
         if self.max_size is None:
             return model
-        if full_model is None:
-            full_model = model
         while len(model.blocks) > self.max_size:
-            model = self.fit(full_model)
+            model = self.fit(model)
             model = self.prune(model)
-        """
-        for bc in model.blocks:
-            print(model.blocks)
-            if isinstance(bc, MultiLayerModel):
-                print(bc)
-                self.fit_prune(bc, full_model)
-        """
-        full_model = self.fit(full_model)
-        return full_model
+        model = self.fit(model)
+        return model
 
     def from_class_list(self, blocks_classes: List[Type[AbstractWeightedBlock]],
                         block: Type[AbstractWeightedBlock] = LinearBlock,
