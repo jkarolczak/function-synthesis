@@ -10,8 +10,8 @@ class Model(nn.Module):
         self.blocks = nn.ModuleList(blocks)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        y_hat = torch.zeros((x.shape[0], 1))
-        for b in self.blocks:
+        y_hat = self.blocks[0](x)
+        for b in self.blocks[1:]:
             y_hat += b(x)
         return y_hat
 
@@ -54,12 +54,6 @@ class MultiLayerModel(Model):
     @property
     def scalar_weight(self) -> torch.Tensor:
         return self.block.scalar_weight
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        y_hat = torch.zeros((x.shape[0], 1))
-        for b in self.blocks:
-            y_hat += b(x)
-        return self.block(y_hat)
 
     def str(self, inner: str = "x") -> str:
         return self.block.str(inner="(" + " + ".join([b.str() for b in self.blocks]) + ")")
@@ -112,11 +106,6 @@ class ModelFactoryInterface(ABC):
                 return True, loss_hist
         return False, loss_hist
 
-    def prune(self, model: Model) -> Model:
-        idx, _ = model.least_significant
-        model.delitem(idx)
-        return model
-
     def from_occurrence_dict(self, blocks_classes: Dict[Type[AbstractBlock], int]) -> Model:
         blocks = []
         for (cls, occurrence) in blocks_classes.items():
@@ -130,6 +119,11 @@ class ModelFactory(ModelFactoryInterface):
     def __init__(self, x: torch.Tensor, y: torch.Tensor, max_size: Optional[int] = None, epochs: int = 1000,
                  early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss) -> None:
         super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls)
+
+    def prune(self, model: Model) -> Model:
+        idx, _ = model.least_significant
+        model.delitem(idx)
+        return model
 
     def fit_prune(self, model: Model) -> Model:
         if self.max_size is None:
@@ -153,12 +147,31 @@ class MultiLayerModelFactory(ModelFactoryInterface):
         super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls)
         self.layers = layers
 
+    def prune(self, model: Model) -> Union[Model, Tuple[Model, bool]]:
+        if isinstance(model.blocks[0], AbstractBlock):
+            if len(model.blocks) > self.max_size:
+                idx, _ = model.least_significant
+                model.delitem(idx)
+                return model, True
+            return model, False
+        else:
+            news = []
+            for b_i, block in enumerate(model.blocks):
+                new, status = self.prune(block)
+                news.append(new)
+            if status:
+                model.blocks = nn.ModuleList(news)
+            else:
+                idx, _ = model.least_significant
+                model.delitem(idx)
+            return model, True
+
     def fit_prune(self, model: Model) -> Model:
         if self.max_size is None:
             return model
         while len(model.blocks) > self.max_size:
             model = self.fit(model)
-            model = self.prune(model)
+            model, _ = self.prune(model)
         model = self.fit(model)
         return model
 
