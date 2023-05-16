@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from math import comb
 from typing import Callable
 
 import torch
@@ -9,8 +10,8 @@ from errors import OutOfDomain
 ZERO_CORRECTION = 1e-9
 
 
-class AbstractBlock(nn.Module):
-    def __init__(self, in_features: int, out_features: int) -> None:
+class BlockInterface(nn.Module):
+    def __init__(self, in_features: int, out_features: int, *args, **kwargs) -> None:
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -25,8 +26,8 @@ class AbstractBlock(nn.Module):
         pass
 
 
-class AbstractWeightedBlock(AbstractBlock):
-    def __init__(self, in_features: int, out_features: int) -> None:
+class WeightedBlockInterface(BlockInterface):
+    def __init__(self, in_features: int, out_features: int, *args, **kwargs) -> None:
         super().__init__(in_features=in_features, out_features=out_features)
         self._weight = nn.Parameter(torch.rand(in_features, out_features))
 
@@ -55,10 +56,7 @@ class AbstractWeightedBlock(AbstractBlock):
         return self.str("x")
 
 
-class LinearBlock(AbstractWeightedBlock):
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features=in_features, out_features=out_features)
-
+class LinearBlock(WeightedBlockInterface):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x.clone().mm(self.weight)
 
@@ -66,9 +64,9 @@ class LinearBlock(AbstractWeightedBlock):
         return f"{inner} * {self.weight_str}"
 
 
-class InverseBlock(AbstractWeightedBlock):
-    def __init__(self, in_features: int, out_features: int, correct_values: bool = True) -> None:
-        super().__init__(in_features=in_features, out_features=out_features)
+class InverseBlock(WeightedBlockInterface):
+    def __init__(self, in_features: int, out_features: int, correct_values: bool = True, *args, **kwargs) -> None:
+        super().__init__(in_features=in_features, out_features=out_features, *args, **kwargs)
         self.correct_values = correct_values
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -83,9 +81,9 @@ class InverseBlock(AbstractWeightedBlock):
         return f"(1 / {inner}) * {self.weight_str}"
 
 
-class BiasBlock(AbstractBlock):
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features=in_features, out_features=out_features)
+class BiasBlock(BlockInterface):
+    def __init__(self, in_features: int, out_features: int, *args, **kwargs) -> None:
+        super().__init__(in_features=in_features, out_features=out_features, *args, **kwargs)
         self.bias = nn.Parameter(torch.rand(out_features))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -104,42 +102,30 @@ class BiasBlock(AbstractBlock):
         return torch.mean(self.bias).detach().cpu()
 
 
-class SinBlock(AbstractWeightedBlock):
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features=in_features, out_features=out_features)
-
+class SinBlock(WeightedBlockInterface):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.sin(x).mm(self._weight)
 
 
-class CosBlock(AbstractWeightedBlock):
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features=in_features, out_features=out_features)
-
+class CosBlock(WeightedBlockInterface):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.cos(x).mm(self._weight)
 
 
-class AbsBlock(AbstractWeightedBlock):
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features=in_features, out_features=out_features)
-
+class AbsBlock(WeightedBlockInterface):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.abs(x).mm(self._weight)
 
 
-class SigmoidBlock(AbstractWeightedBlock):
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features=in_features, out_features=out_features)
-
+class SigmoidBlock(WeightedBlockInterface):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return nn.functional.sigmoid(x).mm(self._weight)
 
 
-class AbstractLogBlock(AbstractWeightedBlock):
-    def __init__(self, in_features: int, out_features: int, domain_minimum: int | float = 0.0) -> None:
-        super().__init__(in_features=in_features, out_features=out_features)
-        self.domain_minimum = domain_minimum
+class LogBlockInterface(WeightedBlockInterface):
+    def __init__(self, in_features: int, out_features: int, domain_min: int | float = 0.0, *args, **kwargs) -> None:
+        super().__init__(in_features=in_features, out_features=out_features, *args, **kwargs)
+        self.domain_minimum = domain_min
 
     @property
     @abstractmethod
@@ -147,38 +133,103 @@ class AbstractLogBlock(AbstractWeightedBlock):
         pass
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x += self.domain_minimum
+        try:
+            x += self.domain_minimum + 1e-9
+        except:
+            x += torch.min(self.domain_minimum)
         if torch.sum(x <= 0):
             raise OutOfDomain(x)
         return self.log(x).mm(self._weight)
 
 
-class LnBlock(AbstractLogBlock):
-    def __init__(self, in_features: int, out_features: int, domain_minimum: int | float = 0.0) -> None:
-        super().__init__(in_features=in_features, out_features=out_features, domain_minimum=domain_minimum)
-
+class LnBlock(LogBlockInterface):
     @property
     def log(self) -> Callable[[torch.Tensor], torch.Tensor]:
         return torch.log
 
 
-class Log2Block(AbstractLogBlock):
-    def __init__(self, in_features: int, out_features: int, domain_minimum: int | float = 0.0) -> None:
-        super().__init__(in_features=in_features, out_features=out_features, domain_minimum=domain_minimum)
-
+class Log2Block(LogBlockInterface):
     @property
     def log(self) -> Callable[[torch.Tensor], torch.Tensor]:
         return torch.log2
 
 
-class Log10Block(AbstractLogBlock):
-    def __init__(self, in_features: int, out_features: int, domain_minimum: int | float = 0.0) -> None:
-        super().__init__(in_features=in_features, out_features=out_features, domain_minimum=domain_minimum)
-
+class Log10Block(LogBlockInterface):
     @property
     def log(self) -> Callable[[torch.Tensor], torch.Tensor]:
         return torch.log10
 
 
-ALL_BLOCKS = [AbsBlock, BiasBlock, CosBlock, InverseBlock, LnBlock, Log2Block, Log10Block, LinearBlock, SigmoidBlock,
-              SinBlock]
+class PowInterface(WeightedBlockInterface):
+    @property
+    @abstractmethod
+    def exponent(self) -> int:
+        pass
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.pow(self.exponent).mm(self._weight)
+
+    def str(self, inner: str = "x") -> str:
+        return f"({inner}) ^ {self.exponent} * {self.weight_str}"
+
+
+class Pow2Block(PowInterface):
+    @property
+    def exponent(self) -> int:
+        return 2
+
+
+class Pow3Block(PowInterface):
+    @property
+    def exponent(self) -> int:
+        return 3
+
+
+class Pow4Block(PowInterface):
+    @property
+    def exponent(self) -> int:
+        return 5
+
+
+class Pow5Block(PowInterface):
+    @property
+    def exponent(self) -> int:
+        return 5
+
+
+class PolynomialBlockInterface(WeightedBlockInterface):
+    def __init__(self, in_features: int, out_features: int, *args, **kwargs) -> None:
+        super().__init__(in_features=in_features, out_features=out_features)
+        self._comb_num = comb(in_features, self.n_pairs)
+        self._weight = nn.Parameter(torch.rand(self._comb_num, out_features))
+
+    @property
+    @abstractmethod
+    def n_pairs(self) -> int:
+        pass
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        idcs = torch.combinations(torch.arange(0, x.shape[1]), r=self.n_pairs)
+        return x[:, idcs].prod(-1).mm(self._weight)
+
+
+class Polynomial2Block(PolynomialBlockInterface):
+    @property
+    def n_pairs(self) -> int:
+        return 2
+
+    def str(self, inner: str = "x") -> str:
+        return f"poly({inner}, 2) * {self.weight_str}"
+
+
+class Polynomial3Block(PolynomialBlockInterface):
+    @property
+    def n_pairs(self) -> int:
+        return 3
+
+    def str(self, inner: str = "x") -> str:
+        return f"poly({inner}, 2) * {self.weight_str}"
+
+
+ALL_BLOCKS = [AbsBlock, BiasBlock, CosBlock, InverseBlock, LnBlock, Log2Block, Log10Block, LinearBlock,
+              SigmoidBlock, SinBlock, Pow2Block, Pow3Block, Pow4Block, Pow5Block, Polynomial2Block, Polynomial3Block]

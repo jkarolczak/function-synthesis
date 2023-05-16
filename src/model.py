@@ -5,7 +5,7 @@ from blocks import *
 
 
 class Model(nn.Module):
-    def __init__(self, blocks: List[AbstractBlock]) -> None:
+    def __init__(self, blocks: List[BlockInterface]) -> None:
         super().__init__()
         self.blocks = nn.ModuleList(blocks)
 
@@ -17,7 +17,7 @@ class Model(nn.Module):
 
     @property
     def weights(self) -> List[torch.Tensor | None]:
-        return [b.weight if isinstance(b, AbstractWeightedBlock) else None for b in self.blocks]
+        return [b.weight if isinstance(b, WeightedBlockInterface) else None for b in self.blocks]
 
     @property
     def scalar_weights(self) -> List[torch.Tensor]:
@@ -47,7 +47,7 @@ class Model(nn.Module):
 
 
 class MultiLayerModel(Model):
-    def __init__(self, block: AbstractWeightedBlock, blocks: Union[List[AbstractWeightedBlock], List[Model]]) -> None:
+    def __init__(self, block: WeightedBlockInterface, blocks: Union[List[WeightedBlockInterface], List[Model]]) -> None:
         super().__init__(blocks)
         self.block = block
 
@@ -82,6 +82,7 @@ class ModelFactoryInterface(ABC):
                  early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss) -> None:
         self.in_features = x.shape[1]
         self.out_features = y.shape[1]
+        self.domain_min = x.min(-2).values
         self.x = x
         self.y = y
         self.max_size = max_size
@@ -112,10 +113,11 @@ class ModelFactoryInterface(ABC):
                 return True, loss_hist
         return False, loss_hist
 
-    def from_occurrence_dict(self, blocks_classes: Dict[Type[AbstractBlock], int]) -> Model:
+    def from_occurrence_dict(self, blocks_classes: Dict[Type[BlockInterface], int]) -> Model:
         blocks = []
         for (cls, occurrence) in blocks_classes.items():
-            blocks.extend(cls(self.in_features, self.out_features) for _ in range(occurrence))
+            blocks.extend(
+                cls(self.in_features, self.out_features, domain_min=self.domain_min) for _ in range(occurrence))
         model = Model(blocks=blocks)
         model = self.fit_prune(model)
         return model
@@ -140,8 +142,9 @@ class ModelFactory(ModelFactoryInterface):
         model = self.fit(model)
         return model
 
-    def from_class_list(self, blocks_classes: List[Type[AbstractBlock]]) -> Model:
-        model = Model(blocks=[bc(self.in_features, self.out_features) for bc in blocks_classes])
+    def from_class_list(self, blocks_classes: List[Type[BlockInterface]]) -> Model:
+        model = Model(
+            blocks=[bc(self.in_features, self.out_features, domain_min=self.domain_min) for bc in blocks_classes])
         model = self.fit_prune(model)
         return model
 
@@ -154,7 +157,7 @@ class MultiLayerModelFactory(ModelFactoryInterface):
         self.layers = layers
 
     def prune(self, model: Model) -> Union[Model, Tuple[Model, bool]]:
-        if isinstance(model.blocks[0], AbstractBlock):
+        if isinstance(model.blocks[0], BlockInterface):
             if len(model.blocks) > self.max_size:
                 idx, _ = model.least_significant
                 model.delitem(idx)
@@ -181,16 +184,16 @@ class MultiLayerModelFactory(ModelFactoryInterface):
         model = self.fit(model)
         return model
 
-    def from_class_list(self, blocks_classes: List[Type[AbstractWeightedBlock]],
-                        block: Type[AbstractWeightedBlock] = LinearBlock,
+    def from_class_list(self, blocks_classes: List[Type[WeightedBlockInterface]],
+                        block: Type[WeightedBlockInterface] = LinearBlock,
                         current_layer: int = 1) -> Model:
         if self.layers == current_layer:
             model = MultiLayerModel(
-                block=block(self.out_features, self.out_features),
-                blocks=[bc(self.in_features, self.out_features) for bc in blocks_classes])
+                block=block(self.out_features, self.out_features, domain_min=self.domain_min),
+                blocks=[bc(self.in_features, self.out_features, domain_min=self.domain_min) for bc in blocks_classes])
         else:
             model = MultiLayerModel(
-                block=block(self.out_features, self.out_features),
+                block=block(self.out_features, self.out_features, domain_min=self.domain_min),
                 blocks=[self.from_class_list(blocks_classes, block=bc, current_layer=current_layer + 1) for bc in
                         blocks_classes]
             )
