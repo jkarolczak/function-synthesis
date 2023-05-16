@@ -70,6 +70,12 @@ class MultiLayerModel(Model):
                 length += 1
         return length + 1
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y_hat = self.blocks[0](x)
+        for b in self.blocks[1:]:
+            y_hat += b(x)
+        return self.block(y_hat)
+
 
 class ModelFactoryInterface(ABC):
     def __init__(self, x: torch.Tensor, y: torch.Tensor, max_size: Optional[int] = None, epochs: int = 1000,
@@ -180,11 +186,11 @@ class MultiLayerModelFactory(ModelFactoryInterface):
                         current_layer: int = 1) -> Model:
         if self.layers == current_layer:
             model = MultiLayerModel(
-                block=block(self.in_features, self.out_features),
+                block=block(self.out_features, self.out_features),
                 blocks=[bc(self.in_features, self.out_features) for bc in blocks_classes])
         else:
             model = MultiLayerModel(
-                block=block(self.in_features, self.out_features),
+                block=block(self.out_features, self.out_features),
                 blocks=[self.from_class_list(blocks_classes, block=bc, current_layer=current_layer + 1) for bc in
                         blocks_classes]
             )
