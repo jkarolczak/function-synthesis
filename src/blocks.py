@@ -123,23 +123,51 @@ class SigmoidBlock(WeightedBlockInterface):
 
 
 class LogBlockInterface(WeightedBlockInterface):
-    def __init__(self, in_features: int, out_features: int, domain_min: int | float = 0.0, *args, **kwargs) -> None:
+    def __init__(self, in_features: int, out_features: int, log_mode: str = "symmetric", *args, **kwargs) -> None:
         super().__init__(in_features=in_features, out_features=out_features, *args, **kwargs)
-        self.domain_minimum = domain_min
+        self._set_inner(log_mode)
+
+    def _set_inner(self, log_mode: str) -> None:
+        match log_mode:
+            case "symmetric":
+                self._inner_forward = self._forward_symmetric
+            case "domain_adaptation":
+                self._domain_minimum = None
+                self._inner_forward = self._forward_domain_adaptation
+            case "constant":
+                self._inner_forward = self._forward_constant
 
     @property
     @abstractmethod
     def log(self) -> Callable[[torch.Tensor], torch.Tensor]:
         pass
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        try:
-            x += self.domain_minimum + 1e-9
-        except:
-            x += torch.min(self.domain_minimum)
-        if torch.sum(x <= 0):
-            raise OutOfDomain(x)
+    def _forward_domain_adaptation(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.clone()
+        if self.training:
+            self._domain_minimum = x.min(-2).values if self._domain_minimum is None else self._domain_minimum
+            self._domain_minimum = torch.min(self._domain_minimum, x.min(-2).values)
+        elif torch.any(x.min(-2).value <= self._domain_minimum):
+            raise OutOfDomain(x, domain=(self._domain_minimum, "inf"))
+        x -= self._domain_minimum - 1e-1
         return self.log(x).mm(self._weight)
+
+    def _forward_constant(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.clone()
+        x[x <= 0] = 1
+        return self.log(x).mm(self._weight)
+
+    def _forward_symmetric(self, x: torch.Tensor) -> torch.Tensor:
+        zero_mask = (x == 0)
+        negative_mask = (x < 0)
+        x[zero_mask] = 1
+        x = self.log(torch.abs(x)).mm(self._weight)
+        x[zero_mask] = 0
+        x[negative_mask] *= -1
+        return x
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self._inner_forward(x)
 
 
 class LnBlock(LogBlockInterface):
@@ -188,7 +216,7 @@ class Pow3Block(PowInterface):
 class Pow4Block(PowInterface):
     @property
     def exponent(self) -> int:
-        return 5
+        return 4
 
 
 class Pow5Block(PowInterface):

@@ -79,7 +79,7 @@ class MultiLayerModel(Model):
 
 class ModelFactoryInterface(ABC):
     def __init__(self, x: torch.Tensor, y: torch.Tensor, max_size: Optional[int] = None, epochs: int = 1000,
-                 early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss) -> None:
+                 early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss, **kwargs) -> None:
         self.in_features = x.shape[1]
         self.out_features = y.shape[1]
         self.domain_min = x.min(-2).values
@@ -90,6 +90,7 @@ class ModelFactoryInterface(ABC):
         self.early_stopping = early_stopping
         self.lr = lr
         self.criterion = criterion_cls()
+        self.kwargs = kwargs
 
     def fit(self, model: Model) -> Model:
         optimizer = torch.optim.Adam(model.parameters(), lr=self.lr)
@@ -117,7 +118,7 @@ class ModelFactoryInterface(ABC):
         blocks = []
         for (cls, occurrence) in blocks_classes.items():
             blocks.extend(
-                cls(self.in_features, self.out_features, domain_min=self.domain_min) for _ in range(occurrence))
+                cls(self.in_features, self.out_features, **self.kwargs) for _ in range(occurrence))
         model = Model(blocks=blocks)
         model = self.fit_prune(model)
         return model
@@ -125,8 +126,8 @@ class ModelFactoryInterface(ABC):
 
 class ModelFactory(ModelFactoryInterface):
     def __init__(self, x: torch.Tensor, y: torch.Tensor, max_size: Optional[int] = None, epochs: int = 1000,
-                 early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss) -> None:
-        super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls)
+                 early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss, **kwargs) -> None:
+        super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls, **kwargs)
 
     def prune(self, model: Model) -> Model:
         idx, _ = model.least_significant
@@ -144,7 +145,7 @@ class ModelFactory(ModelFactoryInterface):
 
     def from_class_list(self, blocks_classes: List[Type[BlockInterface]]) -> Model:
         model = Model(
-            blocks=[bc(self.in_features, self.out_features, domain_min=self.domain_min) for bc in blocks_classes])
+            blocks=[bc(self.in_features, self.out_features, **self.kwargs) for bc in blocks_classes])
         model = self.fit_prune(model)
         return model
 
@@ -152,8 +153,8 @@ class ModelFactory(ModelFactoryInterface):
 class MultiLayerModelFactory(ModelFactoryInterface):
     def __init__(self, x: torch.Tensor, y: torch.Tensor, max_size: Optional[int] = None, layers: int = 1,
                  epochs: int = 1000, early_stopping: int = 5, lr: float = 1e-2,
-                 criterion_cls: nn.Module = nn.MSELoss) -> None:
-        super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls)
+                 criterion_cls: nn.Module = nn.MSELoss, **kwargs) -> None:
+        super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls, **kwargs)
         self.layers = layers
 
     def prune(self, model: Model) -> Union[Model, Tuple[Model, bool]]:
@@ -189,11 +190,11 @@ class MultiLayerModelFactory(ModelFactoryInterface):
                         current_layer: int = 1) -> Model:
         if self.layers == current_layer:
             model = MultiLayerModel(
-                block=block(self.out_features, self.out_features, domain_min=self.domain_min),
-                blocks=[bc(self.in_features, self.out_features, domain_min=self.domain_min) for bc in blocks_classes])
+                block=block(self.out_features, self.out_features, **self.kwargs),
+                blocks=[bc(self.in_features, self.out_features, **self.kwargs) for bc in blocks_classes])
         else:
             model = MultiLayerModel(
-                block=block(self.out_features, self.out_features, domain_min=self.domain_min),
+                block=block(self.out_features, self.out_features, **self.kwargs),
                 blocks=[self.from_class_list(blocks_classes, block=bc, current_layer=current_layer + 1) for bc in
                         blocks_classes]
             )
