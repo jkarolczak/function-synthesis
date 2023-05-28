@@ -122,13 +122,15 @@ class SigmoidBlock(WeightedBlockInterface):
         return nn.functional.sigmoid(x).mm(self._weight)
 
 
-class LogBlockInterface(WeightedBlockInterface):
-    def __init__(self, in_features: int, out_features: int, log_mode: str = "symmetric", *args, **kwargs) -> None:
+class ClosedDomainBlockInterface(WeightedBlockInterface):
+    def __init__(self, in_features: int, out_features: int, function: Callable[[torch.Tensor], torch.Tensor],
+                 mode: str = "symmetric", *args, **kwargs) -> None:
         super().__init__(in_features=in_features, out_features=out_features, *args, **kwargs)
-        self._set_inner(log_mode)
+        self._set_inner(mode)
+        self._function = function
 
-    def _set_inner(self, log_mode: str) -> None:
-        match log_mode:
+    def _set_inner(self, mode: str) -> None:
+        match mode:
             case "symmetric":
                 self._inner_forward = self._forward_symmetric
             case "domain_adaptation":
@@ -136,11 +138,6 @@ class LogBlockInterface(WeightedBlockInterface):
                 self._inner_forward = self._forward_domain_adaptation
             case "constant":
                 self._inner_forward = self._forward_constant
-
-    @property
-    @abstractmethod
-    def log(self) -> Callable[[torch.Tensor], torch.Tensor]:
-        pass
 
     def _forward_domain_adaptation(self, x: torch.Tensor) -> torch.Tensor:
         x = x.clone()
@@ -150,24 +147,35 @@ class LogBlockInterface(WeightedBlockInterface):
         elif torch.any(x.min(-2).value <= self._domain_minimum):
             raise OutOfDomain(x, domain=(self._domain_minimum, "inf"))
         x -= self._domain_minimum - 1e-1
-        return self.log(x).mm(self._weight)
+        return self._function(x).mm(self._weight)
 
     def _forward_constant(self, x: torch.Tensor) -> torch.Tensor:
         x = x.clone()
         x[x <= 0] = 1
-        return self.log(x).mm(self._weight)
+        return self._function(x).mm(self._weight)
 
     def _forward_symmetric(self, x: torch.Tensor) -> torch.Tensor:
         zero_mask = (x == 0)
         negative_mask = (x < 0)
         x[zero_mask] = 1
-        x = self.log(torch.abs(x)).mm(self._weight)
+        x = self._function(torch.abs(x)).mm(self._weight)
         x[zero_mask] = 0
         x[negative_mask] *= -1
         return x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._inner_forward(x)
+
+
+class LogBlockInterface(ClosedDomainBlockInterface):
+    def __init__(self, in_features: int, out_features: int, mode: str = "symmetric", *args, **kwargs) -> None:
+        super().__init__(in_features=in_features, out_features=out_features, function=self.log, mode=mode, *args,
+                         **kwargs)
+
+    @property
+    @abstractmethod
+    def log(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        pass
 
 
 class LnBlock(LogBlockInterface):
@@ -186,6 +194,29 @@ class Log10Block(LogBlockInterface):
     @property
     def log(self) -> Callable[[torch.Tensor], torch.Tensor]:
         return torch.log10
+
+
+class RootBlockInterface(ClosedDomainBlockInterface):
+    def __init__(self, in_features: int, out_features: int, mode: str = "symmetric", *args, **kwargs) -> None:
+        super().__init__(in_features=in_features, out_features=out_features, function=self.root, mode=mode, *args,
+                         **kwargs)
+
+    @property
+    @abstractmethod
+    def root(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        pass
+
+
+class SqrtBlock(RootBlockInterface):
+    @property
+    def root(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        return torch.sqrt
+
+
+class CubeRootBlock(RootBlockInterface):
+    @property
+    def root(self) -> Callable[[torch.Tensor], torch.Tensor]:
+        return lambda x: torch.pow(x, 3)
 
 
 class PowInterface(WeightedBlockInterface):
