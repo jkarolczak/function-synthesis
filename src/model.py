@@ -79,13 +79,15 @@ class MultiLayerModel(Model):
 
 class ModelFactoryInterface(ABC):
     def __init__(self, x: torch.Tensor, y: torch.Tensor, max_size: Optional[int] = None, epochs: int = 1000,
-                 early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss, **kwargs) -> None:
+                 early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss,
+                 min_significance: Optional[float] = None, **kwargs) -> None:
         self.in_features = x.shape[1]
         self.out_features = y.shape[1]
         self.domain_min = x.min(-2).values
         self.x = x
         self.y = y
         self.max_size = max_size
+        self.min_significance = min_significance
         self.epochs = epochs
         self.early_stopping = early_stopping
         self.lr = lr
@@ -126,8 +128,9 @@ class ModelFactoryInterface(ABC):
 
 class ModelFactory(ModelFactoryInterface):
     def __init__(self, x: torch.Tensor, y: torch.Tensor, max_size: Optional[int] = None, epochs: int = 1000,
-                 early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss, **kwargs) -> None:
-        super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls, **kwargs)
+                 early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss,
+                 min_significance: Optional[float] = None, **kwargs) -> None:
+        super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls, min_significance, **kwargs)
 
     def prune(self, model: Model) -> Model:
         idx, _ = model.least_significant
@@ -135,12 +138,16 @@ class ModelFactory(ModelFactoryInterface):
         return model
 
     def fit_prune(self, model: Model) -> Model:
-        if self.max_size is None:
-            return model
-        while len(model.blocks) > self.max_size:
+        if self.max_size is None and self.min_significance is None:
+            return self.fit(model)
+        while self.max_size is not None and len(model.blocks) > self.max_size:
             model = self.fit(model)
             model = self.prune(model)
-        model = self.fit(model)
+        while self.min_significance is not None and len(model.blocks) > 1:
+            model = self.fit(model)
+            if model.least_significant[1] > self.min_significance:
+                return model
+            model = self.prune(model)
         return model
 
     def from_class_list(self, blocks_classes: List[Type[BlockInterface]]) -> Model:
@@ -152,14 +159,15 @@ class ModelFactory(ModelFactoryInterface):
 
 class MultiLayerModelFactory(ModelFactoryInterface):
     def __init__(self, x: torch.Tensor, y: torch.Tensor, max_size: Optional[int] = None, layers: int = 1,
-                 epochs: int = 1000, early_stopping: int = 5, lr: float = 1e-2,
-                 criterion_cls: nn.Module = nn.MSELoss, **kwargs) -> None:
-        super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls, **kwargs)
+                 epochs: int = 1000, early_stopping: int = 5, lr: float = 1e-2, criterion_cls: nn.Module = nn.MSELoss,
+                 min_significance: Optional[float] = None, **kwargs) -> None:
+        super().__init__(x, y, max_size, epochs, early_stopping, lr, criterion_cls, min_significance, **kwargs)
         self.layers = layers
 
     def prune(self, model: Model) -> Union[Model, Tuple[Model, bool]]:
         if isinstance(model.blocks[0], BlockInterface):
-            if len(model.blocks) > self.max_size:
+            if len(model.blocks) > self.max_size or (
+                    len(model.blocks) > 1 and model.least_significant[1] < self.min_significance):
                 idx, _ = model.least_significant
                 model.delitem(idx)
                 return model, True
@@ -177,10 +185,15 @@ class MultiLayerModelFactory(ModelFactoryInterface):
             return model, True
 
     def fit_prune(self, model: Model) -> Model:
-        if self.max_size is None:
-            return model
-        while len(model.blocks) > self.max_size:
+        if self.max_size is None and self.min_significance is None:
+            return self.fit(model)
+        while self.max_size is not None and len(model.blocks) > self.max_size:
             model = self.fit(model)
+            model, _ = self.prune(model)
+        while self.min_significance is not None and len(model.blocks) > 1:
+            model = self.fit(model)
+            if model.least_significant[1] > self.min_significance:
+                return model
             model, _ = self.prune(model)
         model = self.fit(model)
         return model
