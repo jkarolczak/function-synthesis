@@ -1,6 +1,7 @@
 from abc import ABC
 from typing import Dict, List, Optional, Tuple, Type, Union
 
+from itertools import product
 from blocks import *
 
 
@@ -46,7 +47,7 @@ class Model(nn.Module):
         return len(self.blocks)
 
 
-class MultiLayerModel(Model):
+class AdditiveMultiLayerModel(Model):
     def __init__(self, block: WeightedBlockInterface, blocks: Union[List[WeightedBlockInterface], List[Model]]) -> None:
         super().__init__(blocks)
         self.block = block
@@ -74,6 +75,37 @@ class MultiLayerModel(Model):
         y_hat = self.blocks[0](x)
         for b in self.blocks[1:]:
             y_hat += b(x)
+        return self.block(y_hat)
+
+
+class MultiplicativeMultiLayerModel(Model):
+    def __init__(self, block: WeightedBlockInterface, blocks: Union[List[WeightedBlockInterface], List[Model]]) -> None:
+        super().__init__(blocks)
+        self.block = block
+
+    @property
+    def scalar_weight(self) -> torch.Tensor:
+        return self.block.scalar_weight
+
+    def str(self, inner: str = "x") -> str:
+        return self.block.str(inner="(" + " * ".join([b.str() for b in self.blocks]) + ")")
+
+    def __str__(self) -> str:
+        return "y = " + self.str()
+
+    def __len__(self) -> int:
+        length = 0
+        for b in self.blocks:
+            try:
+                length += len(b)
+            except:
+                length += 1
+        return length + 1
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y_hat = self.blocks[0](x)
+        for b in self.blocks[1:]:
+            y_hat *= b(x)
         return self.block(y_hat)
 
 
@@ -167,7 +199,7 @@ class MultiLayerModelFactory(ModelFactoryInterface):
     def prune(self, model: Model) -> Union[Model, Tuple[Model, bool]]:
         if isinstance(model.blocks[0], BlockInterface):
             if len(model.blocks) > self.max_size or (
-                    len(model.blocks) > 1 and model.least_significant[1] < self.min_significance):
+                    len(model.blocks) > 1 and self.min_significance and model.least_significant[1] < self.min_significance):
                 idx, _ = model.least_significant
                 model.delitem(idx)
                 return model, True
@@ -180,8 +212,13 @@ class MultiLayerModelFactory(ModelFactoryInterface):
             if status:
                 model.blocks = nn.ModuleList(news)
             else:
-                idx, _ = model.least_significant
-                model.delitem(idx)
+                if len(model.blocks) > self.max_size or (
+                        len(model.blocks) > 1 and (self.min_significance
+                        and model.least_significant[1] < self.min_significance)):
+                    idx, _ = model.least_significant
+                    model.delitem(idx)
+                else:
+                    return model, False
             return model, True
 
     def fit_prune(self, model: Model) -> Model:
@@ -200,16 +237,21 @@ class MultiLayerModelFactory(ModelFactoryInterface):
 
     def from_class_list(self, blocks_classes: List[Type[WeightedBlockInterface]],
                         block: Type[WeightedBlockInterface] = LinearBlock,
+                        composite_block = AdditiveMultiLayerModel,
+                        composite_blocks = [AdditiveMultiLayerModel],
                         current_layer: int = 1) -> Model:
         if self.layers == current_layer:
-            model = MultiLayerModel(
+            model = composite_block(
                 block=block(self.out_features, self.out_features, **self.kwargs),
                 blocks=[bc(self.in_features, self.out_features, **self.kwargs) for bc in blocks_classes])
         else:
-            model = MultiLayerModel(
+            model = composite_block(
                 block=block(self.out_features, self.out_features, **self.kwargs),
-                blocks=[self.from_class_list(blocks_classes, block=bc, current_layer=current_layer + 1) for bc in
-                        blocks_classes]
+                blocks=[self.from_class_list(blocks_classes,
+                                             block=bc,
+                                             composite_block=comp_bc,
+                                             current_layer=current_layer + 1)
+                        for bc, comp_bc in product(blocks_classes, composite_blocks)]
             )
         if current_layer == 1:
             model = self.fit_prune(model)
