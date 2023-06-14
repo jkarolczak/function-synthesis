@@ -1,7 +1,7 @@
 from abc import ABC
+from itertools import product
 from typing import Dict, List, Optional, Tuple, Type, Union
 
-from itertools import product
 from blocks import *
 
 
@@ -199,7 +199,8 @@ class MultiLayerModelFactory(ModelFactoryInterface):
     def prune(self, model: Model) -> Union[Model, Tuple[Model, bool]]:
         if isinstance(model.blocks[0], BlockInterface):
             if len(model.blocks) > self.max_size or (
-                    len(model.blocks) > 1 and self.min_significance and model.least_significant[1] < self.min_significance):
+                    len(model.blocks) > 1 and self.min_significance and model.least_significant[
+                1] < self.min_significance):
                 idx, _ = model.least_significant
                 model.delitem(idx)
                 return model, True
@@ -214,7 +215,7 @@ class MultiLayerModelFactory(ModelFactoryInterface):
             else:
                 if len(model.blocks) > self.max_size or (
                         len(model.blocks) > 1 and (self.min_significance
-                        and model.least_significant[1] < self.min_significance)):
+                                                   and model.least_significant[1] < self.min_significance)):
                     idx, _ = model.least_significant
                     model.delitem(idx)
                 else:
@@ -237,8 +238,8 @@ class MultiLayerModelFactory(ModelFactoryInterface):
 
     def from_class_list(self, blocks_classes: List[Type[WeightedBlockInterface]],
                         block: Type[WeightedBlockInterface] = LinearBlock,
-                        composite_block = AdditiveMultiLayerModel,
-                        composite_blocks = [AdditiveMultiLayerModel],
+                        composite_block=AdditiveMultiLayerModel,
+                        composite_blocks=[AdditiveMultiLayerModel],
                         current_layer: int = 1) -> Model:
         if self.layers == current_layer:
             model = composite_block(

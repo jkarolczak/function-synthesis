@@ -84,15 +84,15 @@ class InverseBlock(WeightedBlockInterface):
 class BiasBlock(BlockInterface):
     def __init__(self, in_features: int, out_features: int, *args, **kwargs) -> None:
         super().__init__(in_features=in_features, out_features=out_features, *args, **kwargs)
-        self.bias = nn.Parameter(torch.rand(out_features))
+        self.bias = nn.Parameter(torch.rand(out_features).unsqueeze(-1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.bias
+        return torch.ones((x.shape[0], self.out_features)).mm(self.bias)
 
     def str(self, *args, **kwargs) -> str:
         if self.in_features == 1 and self.out_features == 1:
-            return ", ".join([eval("f'{b:2.4f}'") for b in self.bias])
-        return "[" + ", ".join([eval("f'{b:2.4f}'") for b in self.bias]) + "]"
+            return ", ".join([eval("f'{b:2.4f}'") for b in self.bias.squeeze(-1)])
+        return "[" + ", ".join([eval("f'{b:2.4f}'") for b in self.bias.squeeze(-1)]) + "]"
 
     def __str__(self) -> str:
         return self.str()
